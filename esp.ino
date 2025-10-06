@@ -8,14 +8,33 @@
 #include <WiFiClientSecure.h>
 #include <FirebaseClient.h>
 
-// Network and Firebase credentials
-#define WIFI_SSID "wifi."
-#define WIFI_PASSWORD "dejesus1922"
+// Optionally override credentials via secrets.h (not tracked)
+#if defined(__has_include)
+#  if __has_include("secrets.h")
+#    include "secrets.h"
+#  endif
+#endif
 
+// Network and Firebase credentials (defaults if secrets.h not provided)
+#ifndef WIFI_SSID
+#define WIFI_SSID "wifi."
+#endif
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD "dejesus1922"
+#endif
+
+#ifndef Web_API_KEY
 #define Web_API_KEY "AIzaSyCoa7wOqmxYz9k6jgx8aIXTNtctZyi3QRc"
+#endif
+#ifndef DATABASE_URL
 #define DATABASE_URL "https://safesmarthome-9b759-default-rtdb.asia-southeast1.firebasedatabase.app/"
+#endif
+#ifndef USER_EMAIL
 #define USER_EMAIL "2020106241@pampangstateu.edu.ph"
+#endif
+#ifndef USER_PASS
 #define USER_PASS "Group4DaBEST"
+#endif
 
 String house = "House_1";
 
@@ -32,23 +51,26 @@ using AsyncClient = AsyncClientClass;
 AsyncClient aClient(ssl_client);
 RealtimeDatabase Database;
 
-// Timer variables for sending data every 10 seconds
-unsigned long lastSendTime = 0;
-unsigned long lastReadTime = 0;
-const unsigned long sendInterval = 10000; // 10 seconds in milliseconds
-const unsigned long readIntervalMs = 10000;
+// Timers
+unsigned long lastArduinoRxMs = 0;
+unsigned long lastArduinoTxMs = 0;
+unsigned long lastFirebaseSyncMs = 0;
+const unsigned long arduinoRxIntervalMs = 500;    // read from Arduino regularly
+const unsigned long arduinoTxIntervalMs = 2000;   // send controls to Arduino
+const unsigned long firebaseSyncIntervalMs = 10000; // push/pull every 10s
 
 String data1, data2, data3;
 String ir, smoke, gas;
 String irvalue, smokevalue, gasvalue;
 
-char irArray[5];
-char smokeArray[4];
-char gass;
+// Ensure arrays are initialized to '0' so conversions are valid before first update
+char irArray[5]     = {'0','0','0','0','\0'}; // 4 digits + null
+char smokeArray[4]  = {'0','0','0','\0'};     // 3 digits + null
+char gass           = '0';                     // single digit
 
-char ledArray[6];
-char fanArray[4];
-char relayval;
+char ledArray[6]    = {'0','0','0','0','0','\0'}; // 5 digits + null
+char fanArray[4]    = {'0','0','0','\0'};         // 3 digits + null
+char relayval       = '0';
 String ArduinoSendLed;
 String ArduinoSendFan;
 
@@ -79,86 +101,67 @@ void setup() {
 }
 
 void loop() {
-  static unsigned long lastReadTime = 0;
-  if (millis() - lastReadTime >= 5000) {
-    receivearduinocomm();
-    lastReadTime = millis();
-  }
-
-  static unsigned long lastSendTime = 0;
-  if (millis() - lastSendTime >= 5000) {
-    sendarduinocomm();
-    lastReadTime = millis();
-  }
-
   app.loop();
-  // Check if authentication is ready
-  if (app.ready()){
-    unsigned long currentTime = millis();
-    if (currentTime - lastSendTime >= sendInterval){
-      // Update the last send time
-      lastSendTime = currentTime;
 
-      // kitchen
-      int Ksmoke = smokeArray[0] - '0';
-      int Kir = irArray[0] - '0';
-      int Kgas = gass - '0';
-      Database.set<int>(aClient, "/" + house + "/Kitchen/Smoke", Ksmoke, processData, "RTDB_Send_Int");
-      Database.set<int>(aClient, "/" + house + "/Kitchen/IR", Kir, processData, "RTDB_Send_Int");
-      Database.set<int>(aClient, "/" + house + "/Kitchen/Gas", Kgas, processData, "RTDB_Send_Int");
-      // Database.set<int>(aClient, "/" + house + "/Kitchen/Led", 0, processData, "RTDB_Send_Int");
-      
-      // living
-      int Lsmoke = smokeArray[1] - '0';
-      int Lir = irArray[1] - '0';
-      Database.set<int>(aClient, "/" + house + "/Living/Smoke", Lsmoke, processData, "RTDB_Send_Int");
-      Database.set<int>(aClient, "/" + house + "/Living/IR", Lir, processData, "RTDB_Send_Int");
-      // Database.set<int>(aClient, "/" + house + "/Living/Fan", 0, processData, "RTDB_Send_Int");
-      // Database.set<int>(aClient, "/" + house + "/Living/Led", 0, processData, "RTDB_Send_Int");
-      
-      // bed 
-      int Bsmoke = smokeArray[2] - '0';
-      int Bir = irArray[2] - '0';
-      Database.set<int>(aClient, "/" + house + "/Bed/Smoke", Bsmoke, processData, "RTDB_Send_Int");
-      Database.set<int>(aClient, "/" + house + "/Bed/IR", Bir, processData, "RTDB_Send_Int");
-      // Database.set<int>(aClient, "/" + house + "/Bed/Fan", 0, processData, "RTDB_Send_Int");
-      // Database.set<int>(aClient, "/" + house + "/Bed/Led", 0, processData, "RTDB_Send_Int");
+  const unsigned long now = millis();
 
-      // dining 
-      int Dir = irArray[3] - '0';
-      Database.set<int>(aClient, "/" + house + "/Dining/IR", Dir, processData, "RTDB_Send_Int");
-      // Database.set<int>(aClient, "/" + house + "/Dining/Fan", 0, processData, "RTDB_Send_Int");
-      // Database.set<int>(aClient, "/" + house + "/Dining/Led", 0, processData, "RTDB_Send_Int");
-
-      // cr 
-
-      // Database.set<int>(aClient, "/" + house + "/Cr/Led", 0, processData, "RTDB_Send_Int");
-
-      // Light
-      Database.get(aClient, "/" + house + "/Kitchen/Led", processData, false, "Get_Kitchen_Led");
-      Database.get(aClient, "/" + house + "/Living/Led", processData, false, "Get_Living_Led");
-      Database.get(aClient, "/" + house + "/Bed/Led", processData, false, "Get_Bed_Led");
-      Database.get(aClient, "/" + house + "/Dining/Led", processData, false, "Get_Dining_Led");
-      Database.get(aClient, "/" + house + "/Cr/Led", processData, false, "Get_Cr_Led");
-
-      // Fan
-      Database.get(aClient, "/" + house + "/Living/Fan", processData, false, "Get_Living_Fan");
-      Database.get(aClient, "/" + house + "/Bed/Fan", processData, false, "Get_Bed_Fan");
-      Database.get(aClient, "/" + house + "/Dining/Fan", processData, false, "Get_Dining_Fan");
-
-      Database.get(aClient, "/" + house + "/Relay", processData, false, "Get_Relay");
-      
-      
-    }
+  if (now - lastArduinoRxMs >= arduinoRxIntervalMs) {
+    receivearduinocomm();
+    lastArduinoRxMs = now;
   }
 
+  if (now - lastArduinoTxMs >= arduinoTxIntervalMs) {
+    sendarduinocomm();
+    lastArduinoTxMs = now;
+  }
+
+  if (app.ready() && (now - lastFirebaseSyncMs >= firebaseSyncIntervalMs)) {
+    lastFirebaseSyncMs = now;
+
+    // kitchen
+    int Ksmoke = smokeArray[0] - '0';
+    int Kir = irArray[0] - '0';
+    int Kgas = gass - '0';
+    Database.set<int>(aClient, "/" + house + "/Kitchen/Smoke", Ksmoke, processData, "RTDB_Send_Int");
+    Database.set<int>(aClient, "/" + house + "/Kitchen/IR", Kir, processData, "RTDB_Send_Int");
+    Database.set<int>(aClient, "/" + house + "/Kitchen/Gas", Kgas, processData, "RTDB_Send_Int");
+
+    // living
+    int Lsmoke = smokeArray[1] - '0';
+    int Lir = irArray[1] - '0';
+    Database.set<int>(aClient, "/" + house + "/Living/Smoke", Lsmoke, processData, "RTDB_Send_Int");
+    Database.set<int>(aClient, "/" + house + "/Living/IR", Lir, processData, "RTDB_Send_Int");
+
+    // bed 
+    int Bsmoke = smokeArray[2] - '0';
+    int Bir = irArray[2] - '0';
+    Database.set<int>(aClient, "/" + house + "/Bed/Smoke", Bsmoke, processData, "RTDB_Send_Int");
+    Database.set<int>(aClient, "/" + house + "/Bed/IR", Bir, processData, "RTDB_Send_Int");
+
+    // dining 
+    int Dir = irArray[3] - '0';
+    Database.set<int>(aClient, "/" + house + "/Dining/IR", Dir, processData, "RTDB_Send_Int");
+
+    // Pull controls
+    Database.get(aClient, "/" + house + "/Kitchen/Led", processData, false, "Get_Kitchen_Led");
+    Database.get(aClient, "/" + house + "/Living/Led", processData, false, "Get_Living_Led");
+    Database.get(aClient, "/" + house + "/Bed/Led", processData, false, "Get_Bed_Led");
+    Database.get(aClient, "/" + house + "/Dining/Led", processData, false, "Get_Dining_Led");
+    Database.get(aClient, "/" + house + "/Cr/Led", processData, false, "Get_Cr_Led");
+
+    Database.get(aClient, "/" + house + "/Living/Fan", processData, false, "Get_Living_Fan");
+    Database.get(aClient, "/" + house + "/Bed/Fan", processData, false, "Get_Bed_Fan");
+    Database.get(aClient, "/" + house + "/Dining/Fan", processData, false, "Get_Dining_Fan");
+
+    Database.get(aClient, "/" + house + "/Relay", processData, false, "Get_Relay");
+  }
 }
 
 void receivearduinocomm(){
   if (espSerial.available()) {
     String received = espSerial.readStringUntil('\n');
     received.trim();
-    Serial.println("ESP32 received: " + received);
+    Serial.println(String("ESP32 received: ") + received);
 
     // Split into three parts
     int firstSpace = received.indexOf(' ');
@@ -200,7 +203,14 @@ void receivearduinocomm(){
 }
 
 void sendarduinocomm(){
-  arduinoSerial.print("Led#" + ArduinoSendLed + " Fan#" + ArduinoSendFan);
+  // Send one command per line to match Arduino parser
+  if (ArduinoSendLed.length() == 5) {
+    espSerial.println(String("led#") + ArduinoSendLed);
+  }
+  if (ArduinoSendFan.length() == 3) {
+    espSerial.println(String("fan#") + ArduinoSendFan);
+  }
+  espSerial.println(String("relay#") + relayval);
 }
 
 void processData(AsyncResult &aResult) {
@@ -259,9 +269,9 @@ void processData(AsyncResult &aResult) {
   ArduinoSendLed = String(ledArray[0]) + ledArray[1] + ledArray[2] + ledArray[3] + ledArray[4];
   ArduinoSendFan = String(fanArray[0]) + fanArray[1] + fanArray[2];
 
-  Serial.println("Led Kitchen: " + ledArray[0]);
-  Serial.println("Led Living: " + ledArray[1]);
-  Serial.println("Led Bed: " + ledArray[2]);
-  Serial.println("Led Dining: " + ledArray[3]);
-  Serial.println("Led Cr: " + ledArray[4]);
+  Serial.print("Led Kitchen: "); Serial.println(ledArray[0]);
+  Serial.print("Led Living: ");  Serial.println(ledArray[1]);
+  Serial.print("Led Bed: ");     Serial.println(ledArray[2]);
+  Serial.print("Led Dining: ");  Serial.println(ledArray[3]);
+  Serial.print("Led Cr: ");      Serial.println(ledArray[4]);
 }

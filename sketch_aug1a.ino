@@ -204,7 +204,7 @@ static bool enrollFinger(uint8_t id) {
 
 void setup() {
 
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial) { /* wait for Serial */ }
   delay(50);
 
@@ -221,7 +221,6 @@ void setup() {
 
   finger.getTemplateCount();
 
-  Serial.begin(115200);
   arduinoSerial.begin(9600);
   delay(2000);
   setPins();
@@ -361,7 +360,7 @@ void sendesp32comm(){
   String EspSendIR = EspIR[0] + EspIR[1] + EspIR[2] + EspIR[3]; 
   String EspSendSmoke = EspSmoke[0] + EspSmoke[1] + EspSmoke[2];
 
-  arduinoSerial.print("IR#" + EspSendIR + " Smoke#" + EspSendSmoke + " Gas#" + String(Gas));
+  arduinoSerial.println("IR#" + EspSendIR + " Smoke#" + EspSendSmoke + " Gas#" + String(Gas));
   delay(100);
 }
 
@@ -404,31 +403,37 @@ void receiveesp32comm(){
 }
 
 void fingerprint(){
-  if (arduinoSerial.available()) {
-    String received = arduinoSerial.readStringUntil('\n');
-    received.trim();  // Remove newline and extra spaces
+  // Read commands from USB Serial to avoid interfering with ESP32 link
+  if (Serial.available()) {
+    String received = Serial.readStringUntil('\n');
+    received.trim();
     int separatorIndex = received.indexOf('-');
+
+    String fpCommand;
+    String fpValue;
+
     if (separatorIndex != -1) {
-        command = received.substring(0, separatorIndex);
-        value = received.substring(separatorIndex + 1);
-
+      fpCommand = received.substring(0, separatorIndex);
+      fpValue = received.substring(separatorIndex + 1);
     } else {
-        Serial.println("Invalid format (no '-')");
-      }
-    if (command == "e" || command == "E") {
-      value = 5;
-      int myint = value.toInt();
+      Serial.println("Invalid format (no '-')");
+      fpCommand = received;
+    }
 
-      uint8_t id = myint;
-      if (id) {
+    if (fpCommand == "e" || fpCommand == "E") {
+      int idInt = fpValue.toInt();
+      if (idInt < 1 || idInt > 127) {
+        Serial.println(F("ID must be 1..127"));
+      } else {
+        uint8_t id = (uint8_t)idInt;
         bool ok = enrollFinger(id);
         Serial.println(ok ? F("Enroll done.") : F("Enroll failed."));
         finger.getTemplateCount();
         Serial.print(F("Templates: ")); Serial.println(finger.templateCount);
       }
       Serial.println(F("Resuming continuous scanning..."));
-    } 
-}
+    }
+  }
 
   // Continuous verification scan
   scanStep();
